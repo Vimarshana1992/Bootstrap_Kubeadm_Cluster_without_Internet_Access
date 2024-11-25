@@ -1,0 +1,1190 @@
+# Login to "master-node"
+
+# Get the required list of images
+kubeadm config images list
+
+    [root@master-nodecontainerd]# kubeadm config images list
+    W1119 13:27:39.107468    2478 version.go:104] could not fetch a Kubernetes version from the internet: unable to get URL "https://dl.k8s.io/release/stable-1.txt": Get "https://dl.k8s.io/release/stable-1.txt": dial tcp: lookup dl.k8s.io on [::1]:53: read udp [::1]:52002->[::1]:53: read: connection refused
+    W1119 13:27:39.107750    2478 version.go:105] falling back to the local client version: v1.30.6
+    registry.k8s.io/kube-apiserver:v1.30.6
+    registry.k8s.io/kube-controller-manager:v1.30.6
+    registry.k8s.io/kube-scheduler:v1.30.6
+    registry.k8s.io/kube-proxy:v1.30.6
+    registry.k8s.io/coredns/coredns:v1.11.3
+    registry.k8s.io/pause:3.9
+    registry.k8s.io/etcd:3.5.15-0
+    [root@master-nodecontainerd]# 
+
+
+
+
+
+# Login to "local-repo-node"
+
+# Pull the images
+docker pull registry.k8s.io/kube-apiserver:v1.30.6
+docker pull registry.k8s.io/kube-controller-manager:v1.30.6
+docker pull registry.k8s.io/kube-scheduler:v1.30.6
+docker pull registry.k8s.io/kube-proxy:v1.30.6
+docker pull registry.k8s.io/coredns/coredns:v1.11.3
+docker pull registry.k8s.io/pause:3.9
+docker pull registry.k8s.io/etcd:3.5.15-0
+
+# Tag the images
+docker tag registry.k8s.io/kube-apiserver:v1.30.6    10.20.3.10/registry/kube-apiserver:v1.30.6
+docker tag registry.k8s.io/kube-controller-manager:v1.30.6    10.20.3.10/registry/kube-controller-manager:v1.30.6
+docker tag registry.k8s.io/kube-scheduler:v1.30.6     10.20.3.10/registry/kube-scheduler:v1.30.6
+docker tag registry.k8s.io/kube-proxy:v1.30.6     10.20.3.10/registry/kube-proxy:v1.30.6
+docker tag registry.k8s.io/coredns/coredns:v1.11.3     10.20.3.10/registry/coredns:v1.11.3
+docker tag registry.k8s.io/pause:3.9     10.20.3.10/registry/pause:3.9
+docker tag registry.k8s.io/etcd:3.5.15-0    10.20.3.10/registry/etcd:3.5.15-0
+
+# Push the images to the internal docker registry
+docker push 10.20.3.10/registry/kube-apiserver:v1.30.6
+docker push 10.20.3.10/registry/kube-controller-manager:v1.30.6
+docker push 10.20.3.10/registry/kube-scheduler:v1.30.6
+docker push 10.20.3.10/registry/kube-proxy:v1.30.6
+docker push 10.20.3.10/registry/coredns:v1.11.3
+docker push 10.20.3.10/registry/pause:3.9
+docker push 10.20.3.10/registry/etcd:3.5.15-0
+
+
+
+
+
+--------------------------------- Important -------------------------------
+
+# Using custom images
+By default, kubeadm pulls images from registry.k8s.io. If the requested Kubernetes version is a CI label (such as ci/latest) gcr.io/k8s-staging-ci-images is used.
+
+You can override this behavior by using kubeadm with a configuration file. Allowed customization are:
+
+    To provide kubernetesVersion which affects the version of the images.
+    To provide an alternative imageRepository to be used instead of registry.k8s.io.
+    To provide a specific imageRepository and imageTag for etcd or CoreDNS.
+
+
+Image paths between the default registry.k8s.io and a custom repository specified using imageRepository may differ for backwards compatibility reasons. For example, one image might have a subpath at registry.k8s.io/subpath/image, but be defaulted to my.customrepository.io/image when using a custom repository.
+
+To ensure you push the images to your custom repository in paths that kubeadm can consume, you must:
+    Pull images from the defaults paths at registry.k8s.io using kubeadm config images {list|pull}.
+    Push images to the paths from kubeadm config images list --config=config.yaml, where config.yaml contains the custom imageRepository, and/or imageTag for etcd and CoreDNS.
+    Pass the same config.yaml to kubeadm init
+	
+	
+--------------------------------------------------------------------------------
+
+####################################### To initialize the master node in detail ######################################
+
+Refer:
+    "References.txt" to get the whole references list
+
+Reference:
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/"
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/tools/"
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/"
+
+
+####################################### Prerequisites #####################################
+
+Reference:
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/"
+
+# 1. A compatible Linux host. The Kubernetes project provides generic instructions for Linux distributions based on Debian and Red Hat, and those distributions without a package manager.
+    Note:
+    The kubeadm installation is done via binaries that use dynamic linking and assumes that your target system provides glibc. This is a reasonable assumption on many Linux distributions (including Debian, Ubuntu, Fedora, CentOS, etc.) but it is not always the case with custom and lightweight distributions which dont include glibc by default, such as Alpine Linux. The expectation is that the distribution either includes glibc or a compatibility layer that provides the expected symbols.
+
+
+# 2. 2 GB or more of RAM per machine (any less will leave little room for your apps).
+
+
+# 3. 2 CPUs or more.
+
+
+# 4. Full network connectivity between all machines in the cluster (public or private network is fine).
+
+
+# 5. Unique hostname, MAC address, and product_uuid for every node. See here for more details.
+
+    ------------------------------------------------------------------------------------------
+
+    # Hostname [This is what Kubernetes uses to refer the node]
+        hostname
+        cat /etc/hostname
+
+    # Verify the MAC address and product_uuid are unique for every node
+        You can get the MAC address of the network interfaces using the command 
+            ip link 
+            or 
+            ifconfig -a
+
+        The product_uuid can be checked by using the command 
+            cat /sys/class/dmi/id/product_uuid
+
+        It is very likely that hardware devices will have unique addresses, although some virtual machines may have identical values. Kubernetes uses these values to uniquely identify the nodes in the cluster. If these values are not unique to each node, the installation process may fail
+
+    ------------------------------------------------------------------------------------------
+
+
+# 6. Check network adapters
+    If you have more than one network adapter, and your Kubernetes components are not reachable on the default route, we recommend you add IP route(s) so Kubernetes cluster addresses go via the appropriate adapter.
+
+
+# 7. Certain ports are open on your machines
+
+    # Check required ports
+    Reference:
+        "https://v1-30.docs.kubernetes.io/docs/reference/networking/ports-and-protocols/"
+
+        These required ports need to be open in order for Kubernetes components to communicate with each other. You can use tools like netcat to check if a port is open. For example:
+
+            nc 127.0.0.1 6443 -v
+
+        The pod network plugin you use may also require certain ports to be open. Since this differs with each pod network plugin, please see the documentation for the plugins about what port(s) those need.
+
+    # Ports and Protocols
+        When running Kubernetes in an environment with strict network boundaries, such as on-premises datacenter with physical network firewalls or Virtual Networks in Public Cloud, it is useful to be aware of the ports and protocols used by Kubernetes components.
+
+            Protocol	Direction	Port Range	Purpose	Used By
+            TCP	Inbound	6443	Kubernetes API server	All
+            TCP	Inbound	2379-2380	etcd server client API	kube-apiserver, etcd
+            TCP	Inbound	10250	Kubelet API	Self, Control plane
+            TCP	Inbound	10259	kube-scheduler	Self
+            TCP	Inbound	10257	kube-controller-manager	Self
+
+        Although etcd ports are included in control plane section, you can also host your own etcd cluster externally or on custom ports
+
+    ----------------------------------------------------------------------------
+    Refer:
+        "The list of open ports in Ncell prod master node 1.txt"
+
+        # To open the required ports
+        firewall-cmd --permanent --add-port=6443/tcp
+        firewall-cmd --permanent --add-port=2379-2380/tcp
+        firewall-cmd --permanent --add-port=10250/tcp
+        firewall-cmd --permanent --add-port=10257/tcp
+        firewall-cmd --permanent --add-port=10259/tcp
+        firewall-cmd --permanent --add-port=30000-32767/tcp
+        firewall-cmd --permanent --add-port=179/tcp
+        firewall-cmd --reload
+
+        firewall-cmd --permanent --add-port=10251/tcp [Just enabled in case of any requirement]
+        firewall-cmd --permanent --add-port=10252/tcp [Just enabled in case of any requirement]
+        firewall-cmd --reload
+
+        # To verify
+        firewall-cmd --list-ports
+
+            --firewall-cmd --permanent --remove-port
+
+    ----------------------------------------------------------------------------
+
+
+# 8. Swap configuration. The default behavior of a kubelet was to fail to start if swap memory was detected on a node. See Swap memory management for more details.
+
+    You MUST disable swap if the kubelet is not properly configured to use swap. For example, sudo swapoff -a will disable swapping temporarily. To make this change persistent across reboots, make sure swap is disabled in config files like /etc/fstab, systemd.swap, depending how it was configured on your system.
+
+    ---------------------------------------------------------------------------
+
+    # To disable swap
+        swapoff -a
+            -- This should output nothings
+
+    # To persist the change across reboots
+        vi /etc/fstab
+            --Comment out the entry that contains the word "swap" at the middle of the entry
+
+        systemctl daemon-reload
+        mount -a
+        swapon --show
+
+    ---------------------------------------------------------------------------
+
+
+# 9. Let's add its own IP address followed by the hostname entry to the /etc/hosts file to disable going DNS requests to the internal DNS server
+    vi /etc/hosts
+        10.20.1.10 master-node
+
+
+# 10. Verify whether the package "iproute" is already installed
+    rpm -q iproute
+
+    Refer:
+        "The command output in the Ncell prod master node 1.txt"
+
+
+# 11. Verify whether iptables is already installed
+    iptables --version
+
+
+
+# 12. The API server did not come up as a result of enabling 'fapolicyd' [We changed SELinux also to the permissive mode for the safe side. Lets do the same in other Kubernetes clusters as well]
+
+# To change SELinux to permissive
+setenforce 0
+vi /etc/selinux/config
+    SELINUX=permissive
+
+# To verify the SELinux staus
+    sestatus
+
+    [root@master-nodeaee_admin]# sestatus
+    SELinux status:                 enabled
+    SELinuxfs mount:                /sys/fs/selinux
+    SELinux root directory:         /etc/selinux
+    Loaded policy name:             targeted
+    Current mode:                   permissive
+    Mode from config file:          permissive
+    Policy MLS status:              enabled
+    Policy deny_unknown status:     allowed
+    Memory protection checking:     actual (secure)
+    Max kernel policy version:      33
+    [root@master-nodeaee_admin]# 
+
+# stop fapolicyd
+systemctl disable fapolicyd
+systemctl stop fapolicyd
+systemctl status fapolicyd
+
+# Reboot the node to check whether everything is okay and changes have been persisted
+reboot
+
+
+####################################### Prerequisites #####################################
+
+
+
+
+
+
+
+
+################################### Package Installation ##################################
+
+# 1. Installing a container runtime
+    Reference:
+        "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/container-runtimes/"
+
+    By default, Kubernetes uses the Container Runtime Interface (CRI) to interface with your chosen container runtime.
+    [Kubernetes 1.30 requires that you use a runtime that conforms with the Container Runtime Interface (CRI).]
+
+    If you dont specify a runtime, kubeadm automatically tries to detect an installed container runtime by scanning through a list of known endpoints.
+
+    If multiple or no container runtimes are detected kubeadm will throw an error and will request that you specify which one you want to use.
+
+    The tables below include the known endpoints for supported operating systems:
+        Runtime	Path to Unix domain socket
+        containerd	unix:///var/run/containerd/containerd.sock
+        CRI-O	unix:///var/run/crio/crio.sock
+        Docker Engine (using cri-dockerd)	unix:///var/run/cri-dockerd.sock
+
+
+
+    # Install and configure prerequisites
+
+    # Network configuration
+    By default, the Linux kernel does not allow IPv4 packets to be routed between interfaces. Most Kubernetes cluster networking implementations will change this setting (if needed), but some might expect the administrator to do it for them. (Some might also expect other sysctl parameters to be set, kernel modules to be loaded, etc consult the documentation for your specific network implementation.)
+
+    ----------------------------------------------------------------------------------------
+
+    # [Required] To load requierd kernel modules
+        cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+        overlay
+        br_netfilter
+        EOF
+
+        modprobe overlay
+        modprobe br_netfilter
+
+        # To verify the kernel module changes
+        lsmod | grep br_netfilter
+        lsmod | grep overlay
+
+        
+    # To check whether these VMs are hardened in terms of security policiyes 
+
+    cd /etc/modprobe.d/
+    cat cramfs.conf 
+
+        [root@master-nodemodprobe.d]# cat cramfs.conf 
+
+        # Disable per security requirements
+        install cramfs /bin/false
+        blacklist cramfs
+        [root@master-nodemodprobe.d]# 
+
+    [Yes. Therefore, we might required enable some additional kernel parameters and rpc bind server (but to confirm during other Kubernets cluster creation go without enabling these)]
+
+
+    # To enable 'rpcbing' and other kernel parameters
+
+-------------------------------------------------
+
+dnf install rpcbind -y
+systemctl start rpcbind
+systemctl enable rpcbind
+systemctl status rpcbind
+
+
+vi /etc/sysctl.d/k8s.conf
+
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+net.netfilter.nf_conntrack_max = 1000000
+net.netfilter.nf_conntrack_buckets = 524288
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.neigh.default.gc_thresh1 = 4096
+net.ipv4.neigh.default.gc_thresh2 = 8192
+net.ipv4.neigh.default.gc_thresh3 = 16384
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+
+
+# To apply
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv6.conf.all.forwarding=1
+sysctl -w net.netfilter.nf_conntrack_max=1000000
+sysctl -w net.netfilter.nf_conntrack_buckets=524288
+sysctl -w net.ipv4.conf.all.rp_filter=0
+sysctl -w net.ipv4.conf.default.rp_filter=0
+sysctl -w net.ipv4.neigh.default.gc_thresh1=4096
+sysctl -w net.ipv4.neigh.default.gc_thresh2=8192
+sysctl -w net.ipv4.neigh.default.gc_thresh3=16384
+sysctl -w net.bridge.bridge-nf-call-iptables=1
+sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+
+
+# To verify
+sysctl net.ipv4.ip_forward 
+sysctl net.ipv4.conf.all.rp_filter
+sysctl net.bridge.bridge-nf-call-ip6tables
+
+-------------------------------------------------
+
+
+    # Reboot the node to confirm that everything is fine and the changes done get persisted 
+        reboot
+
+    ----------------------------------------------------------------------------------------
+
+
+        # cgroup drivers
+            Both the kubelet and the underlying container runtime need to interface with control groups to enforce resource management for pods and containers and set resources such as cpu/memory requests and limits. To interface with control groups, the kubelet and the container runtime need to use a cgroup driver. It is critical that the kubelet and the container runtime use the same cgroup driver and are configured the same.
+
+            There are two cgroup drivers available:
+                cgroupfs
+                systemd
+
+            # systemd cgroup driver
+                When systemd is chosen as the init system for a Linux distribution, the init process generates and consumes a root control group (cgroup) and acts as a cgroup manager.
+
+                systemd has a tight integration with cgroups and allocates a cgroup per systemd unit. As a result, if you use systemd as the init system with the cgroupfs driver, the system gets two different cgroup managers.
+
+                Two cgroup managers result in two views of the available and in-use resources in the system. In some cases, nodes that are configured to use cgroupfs for the kubelet and container runtime, but use systemd for the rest of the processes become unstable under resource pressure.
+
+                The approach to mitigate this instability is to use systemd as the cgroup driver for the kubelet and the container runtime when systemd is the selected init system.
+
+        # CRI version support 
+            Your container runtime must support at least v1alpha2 of the container runtime interface.
+
+            Kubernetes starting v1.26 only works with v1 of the CRI API. Earlier versions default to v1 version, however if a container runtime does not support the v1 API, the kubelet falls back to using the (deprecated) v1alpha2 API instead.
+
+    # Install containerd
+    Reference:
+            "https://github.com/containerd/containerd/blob/main/docs/getting-started.md"
+
+    The containerd.io packages in DEB and RPM formats are distributed by Docker (not by the containerd project). See the Docker documentation for how to set up apt-get or dnf to install containerd.io packages:
+
+    The containerd.io package contains runc too, but does not contain CNI plugins.
+
+    --------------------------------------------------------------------------------------
+
+        # On RHEL 9
+        Reference:
+            "https://docs.docker.com/engine/install/rhel/"
+
+            # To update the local repository
+                dnf makecache
+
+            # To list available containerd package versions
+                dnf list containerd.io --showduplicates | sort -r
+
+            # To download the latest version of containerd
+                dnf install <containerd package with the version> -y
+                dnf install containerd.io-1.7.22-3.1.el9 -y
+
+        --------------------------------------------------------------------------------------
+
+
+    # Configuring the systemd cgroup driver
+        To use the systemd cgroup driver in /etc/containerd/config.toml with runc, set
+
+            [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+            ...
+            [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                SystemdCgroup = true
+
+        The systemd cgroup driver is recommended if you use cgroup v2.
+
+        # Note #
+        Note:
+        If you installed containerd from a package (for example, RPM or .deb), you may find that the CRI integration plugin is disabled by default.
+
+        You need CRI support enabled to use containerd with Kubernetes. Make sure that cri is not included in thedisabled_plugins list within /etc/containerd/config.toml; if you made changes to that file, also restart containerd.
+
+        If you experience container crash loops after the initial cluster installation or after installing a CNI, the containerd configuration provided with the package might contain incompatible configuration parameters. Consider resetting the containerd configuration with containerd config default > /etc/containerd/config.toml as specified in getting-started.md and then set the configuration parameters specified above accordingly.
+        # Note #
+
+        # If you apply this change, make sure to restart containerd:
+            systemctl restart containerd
+
+        Please note, that it is a best practice for kubelet to declare the matching pod-infra-container-image. If not configured, kubelet may attempt to garbage collect the pause image. There is ongoing work in containerd to pin the pause image and not require this setting on kubelet any longer.
+
+        ---------------------------------------------------------------------------
+
+        # To create a containerd configuration file
+            cd /etc/containerd/
+            cp config.toml config.toml-initial
+            chmod 644 config.toml-initial
+            containerd config default | sudo tee /etc/containerd/config.toml
+
+        # Change SystemdCgroup = false to SystemdCgroup = true
+            vi /etc/containerd/config.toml
+
+            or
+
+            # You can use sed to swap in true
+            sed -i 's/            SystemdCgroup = false/            SystemdCgroup = true/' /etc/containerd/config.toml
+
+
+        # Make sure that cri is not included in the disabled_plugins list within /etc/containerd/config.toml
+            less /etc/containerd/config.toml
+
+
+        # To verify the change was made
+            less /etc/containerd/config.toml
+
+
+        # To restart containerd with the new configuration
+            systemctl restart containerd
+            systemctl enable containerd
+            systemctl status containerd
+
+
+        # Check the runc version and upgrade it it 1.2.1
+            mv /bin/runc /bin/runc-v1.1.14
+
+            # Login to "aee-cplane-node-02"
+            scp /bin/runc aee_admin@10.20.1.10:/home/aee_admin/
+
+            # Login to "aee-dev-master-01"
+            cd /home/aee_admin
+
+            chmod +x runc
+            chown root:root runc
+            cp runc /bin/runc
+
+            systemctl daemon-reload
+            systemctl restart containerd
+
+            runc --version
+
+        ---------------------------------------------------------------------------
+
+
+
+
+# 2. Installing kubeadm, kubelet and kubectl
+
+    You will install these packages on all of your machines:
+
+    -------------------------------------------------------------------------------
+
+    # [Already did earlier] Set SELinux to permissive mode:
+
+        # Set SELinux in permissive mode (effectively disabling it)
+        sudo setenforce 0
+        sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+        Caution:
+            Setting SELinux in permissive mode by running setenforce 0 and sed ... effectively disables it. This is required to allow containers to access the host filesystem. for example, some cluster network plugins require that. You have to do this until SELinux support is improved in the kubelet.
+            You can leave SELinux enabled if you know how to configure it but it may require settings that are not supported by kubeadm.
+
+        # Note #
+        Although SELinux is enabled on the node level, it should be enabled from the containerd config.toml file as well to be applied the container SELinux policy
+        # Note #
+
+    # Add the Kubernetes yum repository. The exclude parameter in the repository definition ensures that the packages related to Kubernetes are not upgraded upon running yum update as there's a special procedure that must be followed for upgrading Kubernetes. Please note that this repository have packages only for Kubernetes 1.30; for other Kubernetes minor versions, you need to change the Kubernetes minor version in the URL to match your desired minor version (you should also check that you are reading the documentation for the version of Kubernetes that you plan to install).
+
+
+    # To update the local repository
+        dnf makecache
+
+
+    # To list the avilable package versions
+        dnf list kubeadm --showduplicates --disableexcludes=kubernetes | sort -r
+
+
+    # To downlaod required pacakges with the specific version
+        dnf install kubeadm-1.30.6 kubelet-1.30.6 kubectl-1.30.6 --disableexcludes=kubernetes
+
+
+    # (Optional) Enable the kubelet service before running kubeadm:
+        systemctl enable --now kubelet
+
+    The kubelet is now restarting every few seconds, as it waits in a crashloop for kubeadm to tell it what to do
+
+    -------------------------------------------------------------------------------
+
+
+
+# 3. Configuring a cgroup driver
+    Reference:
+        "https://v1-30.docs.kubernetes.io/docs/tasks/administer-cluster/kubeadm/configure-cgroup-driver/"
+    Warning:
+        Matching the container runtime and kubelet cgroup drivers is required or otherwise the kubelet process will fail.
+
+    kubeadm allows you to pass a KubeletConfiguration structure during kubeadm init. This KubeletConfiguration can include the cgroupDriver field which controls the cgroup driver of the kubelet.
+
+    # Note #
+    Note:
+    In v1.22 and later, if the user does not set the cgroupDriver field under KubeletConfiguration, kubeadm defaults it to systemd.
+    # Note #
+
+    A minimal example of configuring the field explicitly:
+        # kubeadm-config.yaml
+        kind: ClusterConfiguration
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kubernetesVersion: v1.21.0
+        ---
+        kind: KubeletConfiguration
+        apiVersion: kubelet.config.k8s.io/v1beta1
+        cgroupDriver: systemd
+
+    Such a configuration file can then be passed to the kubeadm command:
+        kubeadm init --config kubeadm-config.yaml
+
+    # Note #
+    Note:
+    Kubeadm uses the same KubeletConfiguration for all nodes in the cluster. The KubeletConfiguration is stored in a ConfigMap object under the kube-system namespace.
+
+    Executing the sub commands init, join and upgrade would result in kubeadm writing the KubeletConfiguration as a file under /var/lib/kubelet/config.yaml and passing it to the local node kubelet.
+    # Note #
+
+################################### Package Installation ##################################
+
+
+
+
+
+
+
+############################ Cluster Initialization with Kubeadm ###########################
+
+Reference:
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/"
+
+[Important] Refer:
+    "Testing - cluster initialization with Kubeadm.txt"
+    
+
+# Network setup
+    kubeadm similarly to other Kubernetes components tries to find a usable IP on the network interfaces associated with a default gateway on a host. Such an IP is then used for the advertising and/or listening performed by a component.
+
+    --------------------------------------------------------------------------------
+
+    To find out what this IP is on a Linux host you can use:
+        ip route show # Look for a line starting with "default via"
+
+    Note:
+        If two or more default gateways are present on the host, a Kubernetes component will try to use the first one it encounters that has a suitable global unicast IP address. While making this choice, the exact ordering of gateways might vary between different operating systems and kernel versions.
+
+    --------------------------------------------------------------------------------
+
+    To configure the API server advertise address for control plane nodes created with both init and join, the flag --apiserver-advertise-address can be used. Preferably, this option can be set in the kubeadm API as InitConfiguration.localAPIEndpoint and JoinConfiguration.controlPlane.localAPIEndpoint. [If not set the default network interface will be used.]
+
+    The IP addresses that you assign to control plane components become part of their X.509 certificates subject alternative name fields. Changing these IP addresses would require signing new certificates and restarting the affected components, so that the change in certificate files is reflected. See Manual certificate renewal for more details on this topic.
+
+
+
+
+
+# Download required images manually since the master node does not have internet
+    Refer:
+        "Running kubeadm without an Internet connection.txt"
+
+
+
+
+
+# Initializing your control-plane node
+    The control-plane node is the machine where the control plane components run, including etcd (the cluster database) and the API Server (which the kubectl command line tool communicates with).
+
+        1. (Recommended) If you have plans to upgrade this single control-plane kubeadm cluster to high availability you should specify the --control-plane-endpoint to set the shared endpoint for all control-plane nodes. Such an endpoint can be either a DNS name or an IP address of a load-balancer.
+        2. Choose a Pod network add-on, and verify whether it requires any arguments to be passed to kubeadm init. Depending on which third-party provider you choose, you might need to set the --pod-network-cidr to a provider-specific value. See Installing a Pod network add-on.
+        3. (Optional) kubeadm tries to detect the container runtime by using a list of well known endpoints. To use different container runtime or if there are more than one installed on the provisioned node, specify the --cri-socket argument to kubeadm. See Installing a runtime.
+
+    ----------------------------------------------------------------------------------------------
+
+    # To initialize the control-plane node run:
+    Reference:
+        "https://v1-30.docs.kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/"
+        "https://v1-30.docs.kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-config/"
+        "https://v1-30.docs.kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/#config-file"
+
+    Refer:
+        "The kubeadm-config configmap in the Ncell Dev cluster.txt"
+        "The command output of the local K8s cluster setup.txt"
+
+        kubeadm init <args>
+
+            --pod-network-cidr string: Specify range of IP addresses for the pod network. If set, the control plane will automatically allocate CIDRs for every node.
+            --cri-socket string: Path to the CRI socket to connect. If empty kubeadm will try to auto-detect this value. use this option only if you have more than one CRI installed or if you have non-standard CRI socket.
+            --control-plane-endpoint string: Specify a stable IP address or DNS name for the control plane.
+
+        # The followings are when passing a config file (The key names are different to args in kubadm init)
+        imageRepository: To provide an alternative imageRepository to be used instead of registry.k8s.io via the config file
+        advertiseAddress: To select a specific IP address out of multiple ones
+        podSubnet: Specify range of IP addresses for the pod network. If set, the control plane will automatically allocate CIDRs for every node
+        name under nodeRegistration: The node hostname
+        kubernetesVersion:
+
+    ------------------ Actual steps ----------------------
+        # Add the following configurations to the "crictl.yaml" file to use the "crictl" with containerd runtime
+        cat <<EOF > /etc/crictl.yaml
+        runtime-endpoint: unix:///var/run/containerd/containerd.sock
+        image-endpoint: unix:///var/run/containerd/containerd.sock
+        timeout: 10
+        debug: false
+        EOF
+
+
+        # To print the default static configuration that kubeadm uses for kubeadm init join
+            cd /home/aee_admin
+            mkdir k8s-cluster-creation
+            cd k8s-cluster-creation
+            kubeadm config print
+            kubeadm config print init-defaults > kubeadm-init-config.yaml
+            cp kubeadm-init-config.yaml kubeadm-init-config.yaml-initial
+
+
+        # Add the following configurations to the 'kubeadm-init-config.yaml'
+            vi kubeadm-init-config.yaml
+                imageRepository: 10.20.3.10/registry
+                advertiseAddress: 10.20.1.10
+                podSubnet: 10.244.0.0/16
+                name under nodeRegistration: dev1dtemst01
+                kubernetesVersion: 1.30.6
+
+
+        # Change the sandbox image in containerd config.toml
+            vi /etc/containerd/config.toml
+                sandbox_image = "10.20.3.10/registry/pause:3.9"
+
+            systemctl daemon-reload
+            systemctl restart containerd
+            systemctl restart kubelet
+
+
+
+        # Create a '/etc/resolv.conf' file [The content can be anything. But the present of the file is required]
+            vi /etc/resolv.conf
+                nameserver 8.8.8.8   # Google's DNS
+                nameserver 8.8.4.4   # Google's Secondary DNS
+                
+
+
+        # First pull the required images using the config file
+            kubeadm config images pull --config kubeadm-init-config.yaml
+
+
+        # Initialize the control plane using the config file
+            kubeadm init --config kubeadm-init-config.yaml
+
+
+        # To verify
+            kubectl get nodes -o wide
+            kubectl cluster-info
+            kubectl get pods -n kube-system -o wide
+            kubectl get svc -n kube-system
+    ------------------ Actual steps ----------------------
+
+
+
+
+    # To make kubectl work for your non-root user, run these commands, which are also part of the kubeadm init
+        mkdir -p $HOME/.kube
+        sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+    ----------------------------------------------------------------------------------------------
+
+    Warning:
+        The kubeconfig file admin.conf that kubeadm init generates contains a certificate with Subject: O = kubeadm:cluster-admins, CN = kubernetes-admin. The group kubeadm:cluster-admins is bound to the built-in cluster-admin ClusterRole. Do not share the admin.conf file with anyone.
+
+        kubeadm init generates another kubeconfig file super-admin.conf that contains a certificate with Subject: O = system:masters, CN = kubernetes-super-admin. system:masters is a break-glass, super user group that bypasses the authorization layer (for example RBAC). Do not share the super-admin.conf file with anyone. It is recommended to move the file to a safe location.
+
+        See Generating kubeconfig files for additional users on how to use kubeadm kubeconfig user to generate kubeconfig files for additional users.
+
+    
+    Make a record of the kubeadm join command that kubeadm init outputs. You need this command to join nodes to your cluster.
+
+    The token is used for mutual authentication between the control-plane node and the joining nodes. The token included here is secret. Keep it safe, because anyone with this token can add authenticated nodes to your cluster. These tokens can be listed, created, and deleted with the kubeadm token command. See the kubeadm reference guide
+
+    # [Optional since we are using the internal registry for images] To declare the matching pod-infra-container-image in "/var/lib/kubelet/kubeadm-flags.env" file [If not configured, kubelet may attempt to garbage collect the pause image]
+        --pod-infra-container-image=k8s.gcr.io/pause:3.9
+
+        systemctl restart kubelet
+        systemctl status kubelet
+        
+
+
+
+# Installing a Pod network add-on
+
+    Caution:
+        This section contains important information about networking setup and deployment order. Read all of this advice carefully before proceeding.
+
+        You must deploy a Container Network Interface (CNI) based Pod network add-on so that your Pods can communicate with each other. Cluster DNS (CoreDNS) will not start up before a network is installed.
+
+            1. Take care that your Pod network must not overlap with any of the host networks: you are likely to see problems if there is any overlap. (If you find a collision between your network plugin's preferred Pod network and some of your host networks, you should think of a suitable CIDR block to use instead, then use that during kubeadm init with --pod-network-cidr and as a replacement in your network plugin's YAML).
+
+            2. By default, kubeadm sets up your cluster to use and enforce use of RBAC (role based access control). Make sure that your Pod network plugin supports RBAC, and so do any manifests that you use to deploy it.
+
+            3. If you want to use IPv6--either dual-stack, or single-stack IPv6 only networking--for your cluster, make sure that your Pod network plugin supports IPv6. IPv6 support was added to CNI in v0.6.0.
+
+
+    Several external projects provide Kubernetes Pod networks using CNI, some of which also support Network Policy.
+
+    See a list of add-ons that implement the Kubernetes networking model.
+
+    Please refer to the Installing Addons page for a non-exhaustive list of networking addons supported by Kubernetes. You can install a Pod network add-on with the following command on the control-plane node or a node that has the kubeconfig credentials:
+
+        kubectl apply -f <add-on.yaml>
+
+    You can install only one Pod network per cluster.
+
+    Once a Pod network has been installed, you can confirm that it is working by checking that the CoreDNS Pod is Running in the output of kubectl get pods --all-namespaces. And once the CoreDNS Pod is up and running, you can continue by joining your nodes.
+
+    If your network is not working or CoreDNS is not in the Running state, check out the troubleshooting guide for kubeadm
+
+    ----------------------------------------------------------------------------------------
+
+    Reference:
+		"https://docs.tigera.io/calico/3.28/getting-started/kubernetes/requirements"
+		"https://docs.tigera.io/calico/3.28/operations/upgrading/kubernetes-upgrade"
+
+        Then go for the "Calico for policy and networking" under the "Upgrading an installation that uses manifests and the Kubernetes API datastore" section
+
+    # To install calico overlay network
+
+--------------------- Actual steps ---------------------------
+
+Login to "local-repo-node"
+cd /home/aee_admin
+wget https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml -O calico_v3.28.2.yaml
+scp calico_v3.28.2.yaml aee_admin@10.21.70.185:/home/aee_admin/
+
+docker pull docker.io/calico/cni:v3.28.2
+docker pull docker.io/calico/node:v3.28.2
+docker pull docker.io/calico/kube-controllers:v3.28.2
+
+docker tag docker.io/calico/cni:v3.28.2      10.20.3.10/registry/calico-cni:v3.28.2
+docker tag docker.io/calico/node:v3.28.2     10.20.3.10/registry/calico-node:v3.28.2
+docker tag docker.io/calico/kube-controllers:v3.28.2     10.20.3.10/registry/calico-kube-controllers:v3.28.2
+
+docker push 10.20.3.10/registry/calico-cni:v3.28.2
+docker push 10.20.3.10/registry/calico-node:v3.28.2
+docker push 10.20.3.10/registry/calico-kube-controllers:v3.28.2
+
+
+
+Login to "aee-dev-master-01"
+cd /home/aee_admin
+mv calico_v3.28.2.yaml k8s-cluster-creation/
+cd /home/aee_admin/k8s-cluster-creation
+
+# Edit the image names in calico_v3.28.2.yaml
+    cp calico_v3.28.2.yaml calico_v3.28.2.yaml-initial
+    vi calico_v3.28.2.yaml
+
+# Apply
+    kubectl apply -f calico_v3.28.2.yaml
+
+# To configure calico-node daemonset such that it takes the particular IP address that configured for the node internal-IP
+    Refer:
+        "https://docs.tigera.io/calico/3.28/networking/ipam/ip-autodetection"
+
+    kubectl set env daemonset/calico-node -n kube-system IP_AUTODETECTION_METHOD=kubernetes-internal-ip
+
+--------------------- Actual steps --------------------------
+
+
+
+
+    # Look for the all the system pods and calico pods to change to Running. 
+    # The DNS pod won't start (pending) until the Pod network is deployed and Running.
+        kubectl get pods --all-namespaces --watch
+        watch kubectl get pods --all-namespaces
+
+
+    # Get a list of our current nodes, just the Control Plane Node should be Ready.
+        kubectl get nodes 
+
+
+    # Check out the systemd unit...it's no longer crashlooping because it has static pods to start
+    # Remember the kubelet starts the static pods, and thus the control plane pods
+        systemctl status kubelet.service 
+
+
+    # Let's check out the static pod manifests on the Control Plane Node
+        ls /etc/kubernetes/manifests
+
+
+    # Look more closely at API server and etcd's manifest.
+        more /etc/kubernetes/manifests/etcd.yaml
+        more /etc/kubernetes/manifests/kube-apiserver.yaml
+
+
+    # Check out the directory where the kubeconfig files live for each of the control plane pods.
+        ls /etc/kubernetes
+
+    ----------------------------------------------------------------------------------------
+
+
+
+# [Just check the workload deployment section since we have already changed SELinux to permissive and it is by default disabled in Containerd] To deploy workloads and enabling SELinux in containerd
+    Refer:
+        "To deploy workloads and enabling SELinux in containerd.txt"
+
+
+
+# To install Nginx ingress controller
+	Reference:
+		"https://github.com/kubernetes/ingress-nginx"
+
+    # Download the "ingress.yml" of the new ingress controller [Bare-metal: On our on prem cluster: Bare Metal (NodePort)]
+
+        wget --no-check-certificate https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.5/deploy/static/provider/baremetal/deploy.yaml -O ingress-nginx-v1.10.5.yaml
+
+
+    NOTE:
+        When updating "ingress-nginx-v1.10.5.yaml", I added everything line by line to avoid any whitespaces in the yaml file (Specially tab characters). Also I editted the file keeping it in the server.
+
+    # Since there is no separate manifest for a LoadBalancer Bare Metal Ingress Controller in the web site, lets edit the NodePort service accordingly.
+
+        vi ingress-nginx-v1.10.5.yaml
+
+        # Add the following key and value pair under "ingress-nginx-controller" service spec
+    externalIPs:
+    - <master node IP>
+    - <master node VIP>
+
+
+        # Also change the type of the service to LoadBalancer in the same "ingress-nginx-controller" service spec
+            type: LoadBalancer
+
+
+
+    # Add the following annotations under the "deployment spec"
+        template:
+            metadata:
+                annotations:
+                    prometheus.io/port: "10254"
+                    prometheus.io/scrape: "true"
+
+
+
+    # Add the following configurations to the "ingress-nginx-controller" configmap 
+    data:
+    access-log-path: /var/log/nginx/access.log
+    compute-full-forwarded-for: "true"
+    enable-underscores-in-headers: "true"
+    error-log-path: /var/log/nginx/error.log
+    large-client-header-buffers: 4 64k
+    proxy-read-timeout: "240"
+    proxy-send-timeout: "240"
+    use-forwarded-headers: "true"
+
+
+    # Add the following volume and the volume mount in the deployment to persist logs
+            volumeMounts:
+            - mountPath: /var/log/nginx/
+            name: logs-storage
+
+        volumes:
+        - hostPath:
+            path: /var/log/kubernetes/ingress-nginx/
+            type: DirectoryOrCreate      # Ensures the directory is created on the host if it doesn't exist
+            name: logs-storage
+
+
+    # Add the following "ingress-nginx-logrotate" configmap to the "ingress-nginx-v1.10.5.yaml" file
+        Refer "cm-ingress-nginx-logrotate.yaml"
+
+        vi ingress-nginx-v1.10.5.yaml
+
+
+    # Add the following volume and volume mount in the deployment for the "nginx-ingress-logrotate" configmap
+
+            volumeMounts:
+            - mountPath: /etc/logrotate.d/nginx.log
+            name: logrotateconf
+            subPath: nginx.log
+
+        volumes:
+        - configMap:
+            defaultMode: 420
+            items:
+            - key: nginx.log
+                path: nginx.log
+            name: ingress-nginx-logrotate
+            name: logrotateconf
+
+        # Note #
+        The number 420 is in decimal (base 10).
+        The file mode is specified in octal (base 8).
+
+        So, 420 in decimal is equivalent to 644 in octal. This means that defaultMode: 420 sets the file permissions to 644 (-rw-r--r--)
+        # Note #
+
+
+
+    # To get the images
+
+    docker pull registry.k8s.io/ingress-nginx/controller:v1.10.5
+    docker pull registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.4.4
+
+    docker tag registry.k8s.io/ingress-nginx/controller:v1.10.5      10.20.3.10/registry/ingress-nginx-controller:v1.10.5
+    docker tag registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.4.4      10.20.3.10/registry/ingress-nginx-kube-webhook-certgen:v1.4.4
+
+    docker push 10.20.3.10/registry/ingress-nginx-controller:v1.10.5
+    docker push 10.20.3.10/registry/ingress-nginx-kube-webhook-certgen:v1.4.4
+
+
+
+    # Edit the yaml file to include image names
+        vi ingress-nginx-v1.10.5.yaml
+
+    
+
+    # [Required] Create the directory for logs on each cluster node
+        mkdir -p /var/log/kubernetes/ingress-nginx/
+        chmod 777 /var/log/kubernetes/ingress-nginx/   
+
+
+
+
+    # Apply the updated yaml file 
+        kubectl apply -f ingress-nginx-v1.10.5.yaml
+
+        # Note : To revert the  all applied resources in case of any issue
+            kubectl delete -f ingress-nginx-v1.10.5.yaml
+
+
+
+    # Check the status of resources in ingress-nginx namespace
+        kubectl get all -n ingress-nginx		
+
+
+
+    # Verify the functionality of ingress resource in a test microservice
+
+
+
+    # [Optional] Increase the replica count of the deployment to 3
+        kubectl edit deployment ingress-nginx-controller -n ingress-nginx
+
+
+
+    # Check whether the each ingress controller pod is able to write logs into the following directory (Either by writting to the existing log files or creating new logs file if it does not exist)
+        cd /var/log/kubernetes/ingress-nginx/
+
+
+
+
+
+
+###################### Phase 1: Metrics Server ######################## - [Done]
+
+Refer:
+    "https://github.com/kubernetes-sigs/metrics-server"
+
+
+	wget https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml -O metrics-server.yaml
+
+				or
+
+	curl -L https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml -o metrics-server.yaml
+
+
+
+
+    # To push images to the registry
+    docker pull registry.k8s.io/metrics-server/metrics-server:v0.7.2
+    docker tag registry.k8s.io/metrics-server/metrics-server:v0.7.2     10.20.3.10/registry/metrics-server:v0.7.2
+    docker push 10.20.3.10/registry/metrics-server:v0.7.2
+
+
+
+    # Add these two lines to the metrics server's container args (around line 132)
+        vi metrics-server.yaml
+
+    - --kubelet-insecure-tls
+    - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+
+
+    # Add the tagged image to the yaml file
+        vi metrics-server.yaml
+
+        10.70.129.19:5000/metrics-server:v0.7.1
+
+
+    # Apply the manifest of the Metrics Server
+        kubectl apply --server-side --force-conflicts -f metrics-server.yaml
+
+###################### Phase 1: Metrics Server ########################
+
+
+
+
+
+
+# Do the following on each cluster node to make sure that 'coredns' and 'calico' is working properly
+
+firewall-cmd --permanent --add-port=8472/udp
+firewall-cmd --permanent --set-target=ACCEPT
+firewall-cmd --permanent --add-interface=vxlan.calico
+firewall-cmd --permanent --add-interface="cali+"
+firewall-cmd --reload
+firewall-cmd --list-ports
+systemctl status firewalld
+systemctl restart kubelet
+systemctl status kubelet
+
+
+############################ Cluster Initialization with Kubeadm ###########################
+
+
+
+
+
+
+
+####################################### Additional #########################################
+
+Reference:
+    "https://v1-30.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/"
+
+# Controlling your cluster from machines other than the control-plane node
+    In order to get a kubectl on some other computer (e.g. laptop) to talk to your cluster, you need to copy the administrator kubeconfig file from your control-plane node to your workstation like this:
+
+        scp root@<control-plane-host>:/etc/kubernetes/admin.conf .
+        kubectl --kubeconfig ./admin.conf get nodes
+
+    Warning:
+        The example above assumes SSH access is enabled for root. If that is not the case, you can copy the admin.conf file to be accessible by some other user and scp using that other user instead.
+
+        The admin.conf file gives the user superuser privileges over the cluster. This file should be used sparingly. For normal users, it is recommended to generate an unique credential to which you grant privileges. You can do this with the kubeadm kubeconfig user --client-name <CN> command. That command will print out a KubeConfig file to STDOUT which you should save to a file and distribute to your user. After that, grant privileges by using kubectl create (cluster)rolebinding.
+
+
+
+# Clean up
+    If you used disposable servers for your cluster, for testing, you can switch those off and do no further clean up. You can use kubectl config delete-cluster to delete your local references to the cluster.
+
+    However, if you want to deprovision your cluster more cleanly, you should first drain the node and make sure that the node is empty, then deconfigure the node.
+
+    # Remove the node
+        1. Talking to the control-plane node with the appropriate credentials, run:
+            kubectl drain <node name> --delete-emptydir-data --force --ignore-daemonsets
+
+        2. Before removing the node, reset the state installed by kubeadm:
+            kubeadm reset
+
+            # Note # [This is not from the official doc and not tested by me]
+            After that,
+                rm -rf /etc/cni/net.d
+                systemctl enable containerd
+                sudo systemctl enable kubelet
+                sudo systemctl daemon-reload
+                systemctl restart containerd
+                sudo netstat -lnp | grep 1025 #Should not give any output
+                netstat -tulnp |grep 10250 ##Should not give any output
+                mv /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf_old
+                mv /etc/kubernetes/pki/ca.crt /etc/kubernetes/pki/ca.crt_old
+            # Note # [This is not from the official doc and not tested by me]
+
+        3. The reset process does not reset or clean up iptables rules or IPVS tables. If you wish to reset iptables, you must do so manually:
+            iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+
+        4. If you want to reset the IPVS tables, you must run the following command:
+            ipvsadm -C
+        
+        5. Now remove the node:
+            kubectl delete node <node name>
+
+        If you wish to start over, run kubeadm init or kubeadm join with the appropriate arguments
+
+    # Clean up the control plane
+        You can use kubeadm reset on the control plane host to trigger a best-effort clean up.
+
+        See the kubeadm reset reference documentation for more information about this subcommand and its options.
+            "https://v1-30.docs.kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-reset/"
+
+        # Note # [This is not from the official doc and not tested by me]
+        Whenever you give "kubeadm reset" execute following before giving a "kubeadm init" again.
+            rm -rf /etc/cni/net.d
+            Smart Documentation Page 6
+            rm -rf /etc/cni/net.d
+            systemctl enable containerd
+            sudo systemctl enable kubelet
+            sudo systemctl daemon-reload
+            systemctl restart containerd
+            sudo netstat -lnp | grep 1025 #Should not give any output
+            netstat -tulnp |grep 10250 ##Should not give any output
+            mv /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf_old
+            mv /etc/kubernetes/pki/ca.crt /etc/kubernetes/pki/ca.crt_old
+        # Note # [This is not from the official doc and not tested by me]
+
+
+# Version skew policy
+    While kubeadm allows version skew against some components that it manages, it is recommended that you match the kubeadm version with the versions of the control plane components, kube-proxy and kubelet.
+
+    # kubeadm's skew against the Kubernetes version
+    kubeadm can be used with Kubernetes components that are the same version as kubeadm or one version older. The Kubernetes version can be specified to kubeadm by using the --kubernetes-version flag of kubeadm init or the ClusterConfiguration.kubernetesVersion field when using --config. This option will control the versions of kube-apiserver, kube-controller-manager, kube-scheduler and kube-proxy.
+
+    Example:
+        kubeadm is at 1.30
+        kubernetesVersion must be at 1.30 or 1.29
+
+    # kubeadm's skew against the kubelet
+    Similarly to the Kubernetes version, kubeadm can be used with a kubelet version that is the same version as kubeadm or three versions older.
+
+    Example:
+        kubeadm is at 1.30
+        kubelet on the host must be at 1.30, 1.29, 1.28 or 1.27
+
+    # kubeadm's skew against kubeadm
+    There are certain limitations on how kubeadm commands can operate on existing nodes or whole clusters managed by kubeadm.
+
+    If new nodes are joined to the cluster, the kubeadm binary used for kubeadm join must match the last version of kubeadm used to either create the cluster with kubeadm init or to upgrade the same node with kubeadm upgrade. Similar rules apply to the rest of the kubeadm commands with the exception of kubeadm upgrade.
+
+    Example for kubeadm join:
+        kubeadm version 1.30 was used to create a cluster with kubeadm init
+        Joining nodes must use a kubeadm binary that is at version 1.30
+
+    Nodes that are being upgraded must use a version of kubeadm that is the same MINOR version or one MINOR version newer than the version of kubeadm used for managing the node.
+
+    Example for kubeadm upgrade:
+        kubeadm version 1.29 was used to create or upgrade the node
+        The version of kubeadm used for upgrading the node must be at 1.29 or 1.30
+
+    To learn more about the version skew between the different Kubernetes component see the Version Skew Policy.
+        "https://v1-30.docs.kubernetes.io/releases/version-skew-policy/"
+
+####################################### Additional #########################################
+
+####################################### To initialize the master node in detail ######################################
+
+
